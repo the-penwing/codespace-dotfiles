@@ -1,13 +1,69 @@
 #!/usr/bin/env bash
-# Placeholder dotfiles hook: proves Codespaces runs this script
-# Real setup gets added one by one
+# Dotfiles hook for GitHub Codespaces. Runs once when a Codespace is created.
+# Each step checks its own result and stops on the first failure.
 
-MARKER="$HOME/dotfiles-hook-ran"
-
-if ! date -u +"%Y-%m-%dT%H:%M:%SZ" >"$MARKER"; then
-  echo "install.sh: could not write marker file $MARKER" >&2
+fail() {
+  echo "install.sh: $1" >&2
   exit 1
+}
+
+DOTFILES_DIR="$(cd "$(dirname "$0")" && pwd)" || fail "could not find the dotfiles directory"
+
+GPG_FPR="3949612C4B58A93F3DCD7488A11420689178B907"
+GITHUB_USER="the-penwing"
+
+NVIM_SRC="$HOME/.local/src/nixos-config"
+NVIM_CONFIG="$HOME/.config/nvim"
+
+# --- Step 1: Nix ---
+
+if ! command -v nix >/dev/null 2>&1; then
+  curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix |
+    sh -s -- install --no-confirm || fail "Nix install failed"
 fi
 
-echo "install.sh: marker written to $MARKER"
+NIX_PROFILE="/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"
+if [ -f "$NIX_PROFILE" ]; then
+  # shellcheck source=/dev/null
+  . "$NIX_PROFILE"
+fi
+
+command -v nix >/dev/null 2>&1 || fail "nix is not on PATH after install; open a new shell and re-run"
+
+# --- Step 2: GPG public key ---
+KEY_FILE="$(mktemp)" || fail "could not create a temp file for the GPG key"
+
+curl -fsSL -o "$KEY_FILE" "https://github.com/$GITHUB_USER.gpg" || fail "could not download GPG key from GitHub"
+gpg --batch --import "$KEY_FILE" || fail "could not import GPG key"
+rm -f "$KEY_FILE"
+
+gpg --list-keys "$GPG_FPR" >/dev/null 2>&1 || fail "GPG key $GPG_FPR not found after import"
+
+# --- Step 3: home-manager ---
+
+nix run home-manager/master -- switch --flake "$DOTFILES_DIR#codespace" -b backup ||
+  fail "home-manager switch failed"
+
+# --- Step 4: Neovim config ---
+
+if [ ! -d "$NVIM_SRC/.git" ]; then
+  mkdir -p "$(dirname "$NVIM_SRC")" || fail "could not create $(dirname "$NVIM_SRC")"
+  git clone --filter=blob:none --no-checkout --sparse \
+    "https://github.com/$GITHUB_USER/nixos-config" "$NVIM_SRC" ||
+    fail "could not clone nixos-config"
+  git -C "$NVIM_SRC" sparse-checkout set --cone dotfiles/editor/nvim ||
+    fail "could not set sparse checkout"
+  git -C "$NVIM_SRC" checkout ||
+    fail "could not check out nixos-config"
+fi
+
+if [ -e "$NVIM_CONFIG" ] && [ ! -L "$NVIM_CONFIG" ]; then
+  mv "$NVIM_CONFIG" "$NVIM_CONFIG.backup" || fail "could not move existing $NVIM_CONFIG aside"
+fi
+mkdir -p "$HOME/.config" || fail "could not create $HOME/.config"
+ln -sfn "$NVIM_SRC/dotfiles/editor/nvim" "$NVIM_CONFIG" || fail "could not link $NVIM_CONFIG"
+
+mkdir -p "$HOME/.vim/undodir" || fail "could not create ~/.vim/undodir"
+
+echo "install.sh: finished"
 exit 0
