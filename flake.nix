@@ -29,16 +29,20 @@
         (shellModule "fzf.nix")
         (shellModule "git.nix")
         (shellModule "fastfetch.nix")
+        (shellModule "tmux.nix")
 
         ({lib, ...}: {
+          systemd.user.services = lib.mkForce {};
           programs.git.settings.credential.helper = lib.mkForce "!gh auth git-credential";
           programs.fastfetch.settings.logo.source = lib.mkForce "auto";
           programs.bash = {
             enable = true;
             initExtra = ''
-              unset __ETC_PROFILE_NIX_SOURCED __HM_SESS_VARS_SOURCED
-              . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-              if [[ $- == *i* ]] && command -v zsh >/dev/null 2>&1; then
+              if [[ -z "''${IN_NIX_SHELL:-}" ]]; then
+                unset __ETC_PROFILE_NIX_SOURCED __HM_SESS_VARS_SOURCED
+                . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+              fi
+              if [[ $- == *i* && -z "''${IN_NIX_SHELL:-}" ]] && command -v zsh >/dev/null 2>&1; then
                 exec zsh
               fi
             '';
