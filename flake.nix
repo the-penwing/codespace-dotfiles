@@ -36,6 +36,8 @@
           programs.bash = {
             enable = true;
             initExtra = ''
+              unset __ETC_PROFILE_NIX_SOURCED __HM_SESS_VARS_SOURCED
+              . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
               if [[ $- == *i* ]] && command -v zsh >/dev/null 2>&1; then
                 exec zsh
               fi
