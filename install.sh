@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Dotfiles hook for GitHub Codespaces. Runs once when a Codespace is created.
-# Each step checks its own result and stops on the first failure.
 
 fail() {
   echo "install.sh: $1" >&2
@@ -15,20 +13,37 @@ GITHUB_USER="the-penwing"
 NVIM_SRC="$HOME/.local/src/nixos-config"
 NVIM_CONFIG="$HOME/.config/nvim"
 
-# --- Step 1: Nix ---
+NIX_PREFIX="/nix/var/nix/profiles/default"
+NIX_PROFILE="$NIX_PREFIX/etc/profile.d/nix-daemon.sh"
+NIX_BIN="$NIX_PREFIX/bin/nix"
+NIX_DAEMON="$NIX_PREFIX/bin/nix-daemon"
+NIX_SOCKET="/nix/var/nix/daemon-socket/socket"
 
-if ! command -v nix >/dev/null 2>&1; then
+# --- Step 1: Nix ---
+if [ ! -x "$NIX_BIN" ]; then
   curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix |
     sh -s -- install --no-confirm || fail "Nix install failed"
 fi
-
-NIX_PROFILE="/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"
 if [ -f "$NIX_PROFILE" ]; then
   # shellcheck source=/dev/null
   . "$NIX_PROFILE"
 fi
+export PATH="$NIX_PREFIX/bin:$PATH"
 
-command -v nix >/dev/null 2>&1 || fail "nix is not on PATH after install; open a new shell and re-run"
+[ -x "$NIX_BIN" ] || fail "Nix binary not found at $NIX_BIN after install"
+
+if [ ! -S "$NIX_SOCKET" ]; then
+  # The log is written by this shell as your user, not by sudo, so the redirect is intended.
+  # shellcheck disable=SC2024
+  sudo "$NIX_DAEMON" >"$HOME/nix-daemon.log" 2>&1 &
+  for _ in 1 2 3 4 5; do
+    [ -S "$NIX_SOCKET" ] && break
+    sleep 1
+  done
+  [ -S "$NIX_SOCKET" ] || fail "nix-daemon did not start; see $HOME/nix-daemon.log"
+fi
+
+command -v nix >/dev/null 2>&1 || fail "nix is installed but not on PATH"
 
 # --- Step 2: GPG public key ---
 KEY_FILE="$(mktemp)" || fail "could not create a temp file for the GPG key"
@@ -40,12 +55,10 @@ rm -f "$KEY_FILE"
 gpg --list-keys "$GPG_FPR" >/dev/null 2>&1 || fail "GPG key $GPG_FPR not found after import"
 
 # --- Step 3: home-manager ---
-
 nix run home-manager/master -- switch --flake "$DOTFILES_DIR#codespace" -b backup ||
   fail "home-manager switch failed"
 
 # --- Step 4: Neovim config ---
-
 if [ ! -d "$NVIM_SRC/.git" ]; then
   mkdir -p "$(dirname "$NVIM_SRC")" || fail "could not create $(dirname "$NVIM_SRC")"
   git clone --filter=blob:none --no-checkout --sparse \
