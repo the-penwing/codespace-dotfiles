@@ -33,6 +33,14 @@
         ({lib, ...}: {
           programs.git.settings.credential.helper = lib.mkForce "!gh auth git-credential";
           programs.fastfetch.settings.logo.source = lib.mkForce "auto";
+          programs.bash = {
+            enable = true;
+            initExtra = ''
+              if [[ $- == *i* ]] && command -v zsh >/dev/null 2>&1; then
+                exec zsh
+              fi
+            '';
+          };
         })
 
         {
