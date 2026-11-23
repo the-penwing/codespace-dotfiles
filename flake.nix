@@ -35,6 +35,7 @@
           systemd.user.services = lib.mkForce {};
           programs.git.settings.credential.helper = lib.mkForce "!gh auth git-credential";
           programs.fastfetch.settings.logo.source = lib.mkForce "auto";
+          home.sessionVariables.TERM = "xterm-256color";
           programs.bash = {
             enable = true;
             initExtra = ''
